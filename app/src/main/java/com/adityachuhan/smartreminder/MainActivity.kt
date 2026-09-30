@@ -50,8 +50,16 @@ private fun ReminderApp(vm: ReminderViewModel = viewModel(), timetableVm: Timeta
     var reading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // Some document providers do not grant persistable permissions; the URI is still usable now.
+        }
         reading = true
         scope.launch {
             try {
@@ -68,7 +76,7 @@ private fun ReminderApp(vm: ReminderViewModel = viewModel(), timetableVm: Timeta
             TopAppBar(
                 title = { Text("Smart Reminder") },
                 actions = {
-                    IconButton(onClick = { picker.launch("image/*") }) {
+                    IconButton(onClick = { picker.launch(arrayOf("image/*")) }) {
                         Icon(Icons.Default.Image, contentDescription = "Import timetable")
                     }
                 }
@@ -84,7 +92,7 @@ private fun ReminderApp(vm: ReminderViewModel = viewModel(), timetableVm: Timeta
             Card(Modifier.fillMaxWidth().padding(16.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Timetable import", style = MaterialTheme.typography.titleMedium)
-                    Text("Upload a screenshot. The app will read the timetable on-device, show what it detected, and then create weekly reminders.")
+                    Text("Select a timetable screenshot from your phone. The app reads it on-device, lets you review the detected classes, then creates weekly reminders.")
                     TextButton(onClick = { picker.launch("image/*") }) { Text("Choose timetable screenshot") }
                 }
             }
