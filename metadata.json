@@ -1,6 +1,0 @@
-{
-  "name": "Smart Reminder",
-  "description": "Reliable offline reminder and timetable app with exact alarms, repeat schedules, snooze, and calendar.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
