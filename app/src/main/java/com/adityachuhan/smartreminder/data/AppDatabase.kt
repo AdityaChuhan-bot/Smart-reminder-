@@ -10,25 +10,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(entities = [Reminder::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun reminderDao(): ReminderDao
-
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE reminders ADD COLUMN repeatDayOfWeek INTEGER")
             }
         }
-
         @Volatile private var INSTANCE: AppDatabase? = null
-
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    AppDatabase::class.java,
-                    "smart_reminder.db"
-                ).addMigrations(MIGRATION_1_2)
-                 .build()
-                 .also { INSTANCE = it }
+                INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "smart_reminder.db")
+                    .addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
             }
     }
 }
