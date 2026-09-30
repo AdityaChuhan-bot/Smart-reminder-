@@ -1,25 +1,60 @@
-name: Build Smart Reminder APK
+name: Build and Publish Smart Reminder APK
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
-  contents: read
+  contents: write
+
 jobs:
   build:
+    name: Build and publish APK
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-java@v4
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - run: gradle --no-daemon assembleDebug
-      - uses: actions/upload-artifact@v4
+
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
         with:
           name: smart-reminder-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Prepare release APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "Smart-Reminder-v1.0.${GITHUB_RUN_NUMBER}.apk"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            "Smart-Reminder-v1.0.${GITHUB_RUN_NUMBER}.apk" \
+            --target "$GITHUB_SHA" \
+            --title "Smart Reminder $TAG" \
+            --generate-notes
