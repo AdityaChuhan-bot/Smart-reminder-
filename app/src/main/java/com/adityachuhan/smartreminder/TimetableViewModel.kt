@@ -14,34 +14,25 @@ class TimetableViewModel(app: Application) : AndroidViewModel(app) {
     fun importEntries(entries: List<TimetableEntry>, leadMinutes: Int, onComplete: () -> Unit) {
         viewModelScope.launch {
             entries.forEach { entry ->
-                val classTime = nextClassTime(entry.dayOfWeek, entry.hour, entry.minute)
-                classTime.add(Calendar.MINUTE, -leadMinutes)
-                dao.insert(
-                    Reminder(
-                        title = "Class: ${entry.title}",
-                        note = "Imported from timetable",
-                        triggerAt = classTime.timeInMillis,
-                        repeat = "WEEKLY",
-                        enabled = true,
-                        repeatDayOfWeek = entry.dayOfWeek
-                    )
-                )
+                val c = Calendar.getInstance().apply {
+                    set(Calendar.DAY_OF_WEEK, entry.dayOfWeek)
+                    set(Calendar.HOUR_OF_DAY, entry.hour)
+                    set(Calendar.MINUTE, entry.minute)
+                    set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                    if (timeInMillis <= System.currentTimeMillis()) add(Calendar.WEEK_OF_YEAR, 1)
+                    add(Calendar.MINUTE, -leadMinutes)
+                }
+                dao.insert(Reminder(
+                    title = "Class: ${entry.title}",
+                    note = "Imported from timetable",
+                    triggerAt = c.timeInMillis,
+                    repeat = "WEEKLY",
+                    enabled = true,
+                    repeatDayOfWeek = entry.dayOfWeek
+                ))
             }
             dao.getEnabled().forEach { ReminderScheduler.schedule(getApplication(), it) }
             onComplete()
         }
-    }
-
-    private fun nextClassTime(day: Int, hour: Int, minute: Int): Calendar {
-        val now = Calendar.getInstance()
-        val c = (now.clone() as Calendar).apply {
-            set(Calendar.DAY_OF_WEEK, day)
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        if (c.timeInMillis <= now.timeInMillis) c.add(Calendar.WEEK_OF_YEAR, 1)
-        return c
     }
 }
