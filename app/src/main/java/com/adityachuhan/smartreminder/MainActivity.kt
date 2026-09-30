@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adityachuhan.smartreminder.data.Reminder
@@ -38,7 +39,6 @@ class MainActivity : ComponentActivity() {
 private fun ReminderApp(vm: ReminderViewModel = viewModel()) {
     val reminders by vm.reminders.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
-
     Scaffold(
         topBar = { TopAppBar(title = { Text("Smart Reminder") }) },
         floatingActionButton = { FloatingActionButton(onClick = { showAdd = true }) { Text("+") } }
@@ -54,9 +54,10 @@ private fun ReminderApp(vm: ReminderViewModel = viewModel()) {
             }
         }
     }
-    if (showAdd) AddReminderDialog(onDismiss = { showAdd = false }, onSave = { title, note, time, repeat ->
-        vm.add(title, note, time, repeat); showAdd = false
-    })
+    if (showAdd) AddReminderDialog(
+        onDismiss = { showAdd = false },
+        onSave = { title, note, time, repeat -> vm.add(title, note, time, repeat); showAdd = false }
+    )
 }
 
 @Composable
@@ -82,18 +83,17 @@ private fun AddReminderDialog(onDismiss: () -> Unit, onSave: (String, String, Lo
     var repeat by remember { mutableStateOf("NONE") }
     val initial = remember { Calendar.getInstance().apply { add(Calendar.MINUTE, 5); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) } }
     var selected by remember { mutableStateOf(initial.timeInMillis) }
+    val context = LocalContext.current
 
     fun pickDateTime() {
         val base = Calendar.getInstance().apply { timeInMillis = selected }
-        DatePickerDialog(
-            LocalContext.current, { _, y, m, d ->
-                TimePickerDialog(
-                    LocalContext.current, { _, h, min ->
-                        base.set(y, m, d, h, min, 0); base.set(Calendar.MILLISECOND, 0); selected = base.timeInMillis
-                    }, base.get(Calendar.HOUR_OF_DAY), base.get(Calendar.MINUTE), false
-                ).show()
-            }, base.get(Calendar.YEAR), base.get(Calendar.MONTH), base.get(Calendar.DAY_OF_MONTH)
-        ).show()
+        DatePickerDialog(context, { _, y, m, d ->
+            TimePickerDialog(context, { _, h, min ->
+                base.set(y, m, d, h, min, 0)
+                base.set(Calendar.MILLISECOND, 0)
+                selected = base.timeInMillis
+            }, base.get(Calendar.HOUR_OF_DAY), base.get(Calendar.MINUTE), false).show()
+        }, base.get(Calendar.YEAR), base.get(Calendar.MONTH), base.get(Calendar.DAY_OF_MONTH)).show()
     }
 
     AlertDialog(
