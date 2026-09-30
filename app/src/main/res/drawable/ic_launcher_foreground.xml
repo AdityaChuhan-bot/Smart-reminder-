@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Bell body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,26c-11.05,0 -20,8.95 -20,20v14l-6,6v4h52v-4l-6,-6V46C74,34.95 65.05,26 54,26zM54,82c3.31,0 6,-2.69 6,-6H48C48,79.31 50.69,82 54,82z" />
+    <!-- Clock checkmark accent badge inside bell -->
+    <path
+        android:fillColor="#265EA7"
+        android:pathData="M51,40h6v14h-6z" />
+    <path
+        android:fillColor="#265EA7"
+        android:pathData="M51,51h10v6h-10z" />
+</vector>
