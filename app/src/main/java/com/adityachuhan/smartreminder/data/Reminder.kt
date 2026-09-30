@@ -10,5 +10,6 @@ data class Reminder(
     val note: String = "",
     val triggerAt: Long,
     val repeat: String = "NONE",
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val repeatDayOfWeek: Int? = null
 )
