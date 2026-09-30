@@ -18,6 +18,8 @@ Smart Reminder is designed for dependable local reminders without requiring an a
 - 🚫 No ads, account, backend, analytics, or API key
 - 🤖 Automated GitHub Actions APK builds
 - 📦 Automatic GitHub Release publishing after a successful build
+- 🖼️ Timetable screenshot import with on-device OCR
+- 📚 Automatic weekly class reminders from imported timetables
 
 ## Download
 
@@ -148,7 +150,7 @@ Smart Reminder is designed around local operation.
 Planned improvements include:
 
 - Timetable mode for class schedules
-- Timetable import
+- Custom timetable screenshot import with on-device OCR
 - Custom repeat-day selection
 - Calendar and reminder filtering
 - JSON export/import
@@ -161,7 +163,7 @@ Planned improvements include:
 
 **Active development.**
 
-The project currently focuses on a reliable local reminder foundation and an automated APK delivery pipeline. Features will be expanded incrementally while keeping the application lightweight and privacy-focused.
+The project currently focuses on a reliable local reminder foundation, timetable screenshot import, and an automated APK delivery pipeline. Features will be expanded incrementally while keeping the application lightweight and privacy-focused.
 
 ## License
 
