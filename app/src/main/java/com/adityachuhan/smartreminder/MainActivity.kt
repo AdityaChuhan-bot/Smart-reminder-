@@ -32,7 +32,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adityachuhan.smartreminder.data.Reminder
+import com.adityachuhan.smartreminder.data.TodoItem
 import com.adityachuhan.smartreminder.ui.components.*
 import com.adityachuhan.smartreminder.ui.theme.*
 import kotlinx.coroutines.launch
@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
 
 enum class MainTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     REMINDERS("Reminders", Icons.Default.NotificationsActive),
+    TODOS("To-Do", Icons.Default.Checklist),
     TIMETABLE("Timetable", Icons.Default.School),
     SETTINGS("Settings", Icons.Default.Settings)
 }
@@ -90,27 +91,43 @@ enum class FilterOption(val label: String) {
     ONE_TIME("One-time")
 }
 
+enum class TodoFilter(val label: String) {
+    ALL("All"),
+    PENDING("Pending"),
+    HIGH_PRIORITY("High Priority"),
+    COMPLETED("Completed")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainAppScaffold(
     vm: ReminderViewModel = viewModel(),
-    timetableVm: TimetableViewModel = viewModel()
+    timetableVm: TimetableViewModel = viewModel(),
+    todoVm: TodoViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val reminders by vm.reminders.collectAsState()
+    val todos by todoVm.todos.collectAsState()
     val scope = rememberCoroutineScope()
 
     var currentTab by remember { mutableStateOf(MainTab.REMINDERS) }
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showAddReminderDialog by remember { mutableStateOf(false) }
     var reminderToEdit by remember { mutableStateOf<Reminder?>(null) }
     var reminderToDelete by remember { mutableStateOf<Reminder?>(null) }
 
+    // To-Do Dialog States
+    var showAddTodoDialog by remember { mutableStateOf(false) }
+    var todoToEdit by remember { mutableStateOf<TodoItem?>(null) }
+    var todoToDelete by remember { mutableStateOf<TodoItem?>(null) }
+
+    // Timetable screenshot state
     var entries by remember { mutableStateOf<List<TimetableEntry>>(emptyList()) }
     var reading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val activeCount = remember(reminders) { reminders.count { it.enabled } }
+    val pendingTodoCount = remember(todos) { todos.count { !it.isCompleted } }
 
     fun processScreenshot(uri: Uri) {
         reading = true
@@ -159,7 +176,12 @@ private fun MainAppScaffold(
                             color = IndigoPrimary.copy(alpha = 0.12f)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Alarm,
+                                imageVector = when (currentTab) {
+                                    MainTab.REMINDERS -> Icons.Default.Alarm
+                                    MainTab.TODOS -> Icons.Default.Checklist
+                                    MainTab.TIMETABLE -> Icons.Default.School
+                                    MainTab.SETTINGS -> Icons.Default.Settings
+                                },
                                 contentDescription = null,
                                 tint = IndigoPrimary,
                                 modifier = Modifier
@@ -169,7 +191,12 @@ private fun MainAppScaffold(
                         }
                         Column {
                             Text(
-                                text = "Smart Reminder",
+                                text = when (currentTab) {
+                                    MainTab.REMINDERS -> "Smart Reminder"
+                                    MainTab.TODOS -> "To-Do List"
+                                    MainTab.TIMETABLE -> "Weekly Timetable"
+                                    MainTab.SETTINGS -> "Settings"
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Black
                             )
@@ -182,12 +209,14 @@ private fun MainAppScaffold(
                     }
                 },
                 actions = {
-                    IconButton(onClick = ::chooseScreenshot) {
-                        Icon(
-                            imageVector = Icons.Default.CloudUpload,
-                            contentDescription = "Scan Timetable Screenshot",
-                            tint = PurpleSecondary
-                        )
+                    if (currentTab == MainTab.REMINDERS || currentTab == MainTab.TIMETABLE) {
+                        IconButton(onClick = ::chooseScreenshot) {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = "Scan Timetable Screenshot",
+                                tint = PurpleSecondary
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -206,21 +235,38 @@ private fun MainAppScaffold(
                         selected = isSelected,
                         onClick = { currentTab = tab },
                         icon = {
-                            if (tab == MainTab.REMINDERS && activeCount > 0) {
-                                BadgedBox(
-                                    badge = {
-                                        Badge(
-                                            containerColor = IndigoPrimary,
-                                            contentColor = Color.White
-                                        ) {
-                                            Text(activeCount.toString())
+                            when {
+                                tab == MainTab.REMINDERS && activeCount > 0 -> {
+                                    BadgedBox(
+                                        badge = {
+                                            Badge(
+                                                containerColor = IndigoPrimary,
+                                                contentColor = Color.White
+                                            ) {
+                                                Text(activeCount.toString())
+                                            }
                                         }
+                                    ) {
+                                        Icon(tab.icon, contentDescription = tab.label)
                                     }
-                                ) {
+                                }
+                                tab == MainTab.TODOS && pendingTodoCount > 0 -> {
+                                    BadgedBox(
+                                        badge = {
+                                            Badge(
+                                                containerColor = PurpleSecondary,
+                                                contentColor = Color.White
+                                            ) {
+                                                Text(pendingTodoCount.toString())
+                                            }
+                                        }
+                                    ) {
+                                        Icon(tab.icon, contentDescription = tab.label)
+                                    }
+                                }
+                                else -> {
                                     Icon(tab.icon, contentDescription = tab.label)
                                 }
-                            } else {
-                                Icon(tab.icon, contentDescription = tab.label)
                             }
                         },
                         label = {
@@ -238,18 +284,34 @@ private fun MainAppScaffold(
             }
         },
         floatingActionButton = {
-            if (currentTab != MainTab.SETTINGS) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        reminderToEdit = null
-                        showAddDialog = true
-                    },
-                    icon = { Icon(Icons.Default.Add, null) },
-                    text = { Text("New reminder", fontWeight = FontWeight.Bold) },
-                    containerColor = IndigoPrimary,
-                    contentColor = Color.White,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
-                )
+            when (currentTab) {
+                MainTab.REMINDERS, MainTab.TIMETABLE -> {
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            reminderToEdit = null
+                            showAddReminderDialog = true
+                        },
+                        icon = { Icon(Icons.Default.Add, null) },
+                        text = { Text("New reminder", fontWeight = FontWeight.Bold) },
+                        containerColor = IndigoPrimary,
+                        contentColor = Color.White,
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
+                    )
+                }
+                MainTab.TODOS -> {
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            todoToEdit = null
+                            showAddTodoDialog = true
+                        },
+                        icon = { Icon(Icons.Default.Add, null) },
+                        text = { Text("New task", fontWeight = FontWeight.Bold) },
+                        containerColor = PurpleSecondary,
+                        contentColor = Color.White,
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
+                    )
+                }
+                MainTab.SETTINGS -> {}
             }
         }
     ) { padding ->
@@ -266,11 +328,11 @@ private fun MainAppScaffold(
                         onScanClick = ::chooseScreenshot,
                         onAddClick = {
                             reminderToEdit = null
-                            showAddDialog = true
+                            showAddReminderDialog = true
                         },
                         onEditClick = { reminder ->
                             reminderToEdit = reminder
-                            showAddDialog = true
+                            showAddReminderDialog = true
                         },
                         onDeleteClick = { reminder ->
                             reminderToDelete = reminder
@@ -283,6 +345,32 @@ private fun MainAppScaffold(
                         }
                     )
                 }
+                MainTab.TODOS -> {
+                    TodoTabContent(
+                        todos = todos,
+                        todoVm = todoVm,
+                        onAddClick = {
+                            todoToEdit = null
+                            showAddTodoDialog = true
+                        },
+                        onEditClick = { todo ->
+                            todoToEdit = todo
+                            showAddTodoDialog = true
+                        },
+                        onDeleteClick = { todo ->
+                            todoToDelete = todo
+                        },
+                        onScheduleReminderForTodo = { todo ->
+                            reminderToEdit = Reminder(
+                                title = todo.title,
+                                note = if (todo.note.isNotBlank()) todo.note else "Task from To-Do: ${todo.category}",
+                                triggerAt = todo.dueDate ?: (System.currentTimeMillis() + 60 * 60 * 1000L),
+                                repeat = "NONE"
+                            )
+                            showAddReminderDialog = true
+                        }
+                    )
+                }
                 MainTab.TIMETABLE -> {
                     TimetableTabContent(
                         reminders = reminders,
@@ -290,7 +378,7 @@ private fun MainAppScaffold(
                         onScanClick = ::chooseScreenshot,
                         onEditClick = { reminder ->
                             reminderToEdit = reminder
-                            showAddDialog = true
+                            showAddReminderDialog = true
                         },
                         onDeleteClick = { reminder ->
                             reminderToDelete = reminder
@@ -301,6 +389,8 @@ private fun MainAppScaffold(
                     SettingsTabContent(
                         totalReminders = reminders.size,
                         activeReminders = activeCount,
+                        totalTodos = todos.size,
+                        pendingTodos = pendingTodoCount,
                         onTriggerTest = {
                             val alarm = context.getSystemService(AlarmManager::class.java)
                             val intent = Intent(context, ReminderReceiver::class.java).apply {
@@ -332,15 +422,15 @@ private fun MainAppScaffold(
     }
 
     // Add / Edit Reminder Dialog
-    if (showAddDialog) {
+    if (showAddReminderDialog) {
         AddReminderDialog(
             initialReminder = reminderToEdit,
             onDismiss = {
-                showAddDialog = false
+                showAddReminderDialog = false
                 reminderToEdit = null
             },
             onSave = { title, note, time, repeat, repeatDayOfWeek ->
-                if (reminderToEdit != null) {
+                if (reminderToEdit != null && reminderToEdit!!.id > 0) {
                     val updated = reminderToEdit!!.copy(
                         title = title,
                         note = note,
@@ -355,13 +445,42 @@ private fun MainAppScaffold(
                     vm.add(title, note, time, repeat, repeatDayOfWeek)
                     scope.launch { snackbarHostState.showSnackbar("Reminder scheduled") }
                 }
-                showAddDialog = false
+                showAddReminderDialog = false
                 reminderToEdit = null
             }
         )
     }
 
-    // Delete Confirmation Dialog
+    // Add / Edit Todo Dialog
+    if (showAddTodoDialog) {
+        AddEditTodoDialog(
+            initialTodo = todoToEdit,
+            onDismiss = {
+                showAddTodoDialog = false
+                todoToEdit = null
+            },
+            onSave = { title, note, priority, dueDate, category ->
+                if (todoToEdit != null) {
+                    val updated = todoToEdit!!.copy(
+                        title = title,
+                        note = note,
+                        priority = priority,
+                        dueDate = dueDate,
+                        category = category
+                    )
+                    todoVm.update(updated)
+                    scope.launch { snackbarHostState.showSnackbar("Task updated") }
+                } else {
+                    todoVm.add(title, note, priority, dueDate, category)
+                    scope.launch { snackbarHostState.showSnackbar("Task added to list") }
+                }
+                showAddTodoDialog = false
+                todoToEdit = null
+            }
+        )
+    }
+
+    // Delete Reminder Confirmation Dialog
     reminderToDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { reminderToDelete = null },
@@ -385,6 +504,36 @@ private fun MainAppScaffold(
             },
             dismissButton = {
                 TextButton(onClick = { reminderToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Delete Todo Confirmation Dialog
+    todoToDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { todoToDelete = null },
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("Delete Task?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Are you sure you want to delete \"${target.title}\"?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        todoVm.delete(target)
+                        todoToDelete = null
+                        scope.launch { snackbarHostState.showSnackbar("Task deleted") }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { todoToDelete = null }) {
                     Text("Cancel")
                 }
             }
@@ -702,6 +851,306 @@ private fun RemindersTabContent(
 }
 
 @Composable
+private fun TodoTabContent(
+    todos: List<TodoItem>,
+    todoVm: TodoViewModel,
+    onAddClick: () -> Unit,
+    onEditClick: (TodoItem) -> Unit,
+    onDeleteClick: (TodoItem) -> Unit,
+    onScheduleReminderForTodo: (TodoItem) -> Unit
+) {
+    var quickTaskText by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf(TodoFilter.ALL) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+
+    val totalCount = todos.size
+    val completedCount = remember(todos) { todos.count { it.isCompleted } }
+    val pendingCount = totalCount - completedCount
+    val progress = if (totalCount > 0) completedCount.toFloat() / totalCount else 0f
+
+    val categories = remember(todos) {
+        todos.map { it.category }.distinct().sorted()
+    }
+
+    val filteredTodos = remember(todos, selectedFilter, selectedCategory) {
+        todos.filter { t ->
+            val matchesFilter = when (selectedFilter) {
+                TodoFilter.ALL -> true
+                TodoFilter.PENDING -> !t.isCompleted
+                TodoFilter.HIGH_PRIORITY -> t.priority == "HIGH" && !t.isCompleted
+                TodoFilter.COMPLETED -> t.isCompleted
+            }
+            val matchesCategory = selectedCategory == null || t.category == selectedCategory
+            matchesFilter && matchesCategory
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 100.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Header
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "To-Do & Tasks",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = "Track your assignments, errands, and daily checklist",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Progress Card
+        if (totalCount > 0) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Task Completion",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (progress >= 1f) SuccessGreenContainer else PurpleContainer
+                            ) {
+                                Text(
+                                    text = "$completedCount of $totalCount (${(progress * 100).toInt()}%)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (progress >= 1f) SuccessGreen else PurpleOnContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp),
+                            color = if (progress >= 1f) SuccessGreen else PurpleSecondary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Quick Add Card
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextField(
+                        value = quickTaskText,
+                        onValueChange = { quickTaskText = it },
+                        placeholder = { Text("Quickly add a task...") },
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = {
+                            if (quickTaskText.isNotBlank()) {
+                                todoVm.add(quickTaskText.trim())
+                                quickTaskText = ""
+                            }
+                        },
+                        enabled = quickTaskText.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PurpleSecondary)
+                    ) {
+                        Text("Add", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Filter Chips Row
+        item {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(TodoFilter.entries) { filter ->
+                    val isSelected = selectedFilter == filter
+                    val count = when (filter) {
+                        TodoFilter.ALL -> totalCount
+                        TodoFilter.PENDING -> pendingCount
+                        TodoFilter.HIGH_PRIORITY -> todos.count { it.priority == "HIGH" && !it.isCompleted }
+                        TodoFilter.COMPLETED -> completedCount
+                    }
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { selectedFilter = filter },
+                        label = {
+                            Text(
+                                text = "${filter.label} ($count)",
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        }
+
+        // Category Filter Chips Row if categories exist
+        if (categories.size > 1) {
+            item {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedCategory == null,
+                            onClick = { selectedCategory = null },
+                            label = { Text("All Categories") },
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+                    items(categories) { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = if (selectedCategory == cat) null else cat },
+                            label = { Text(cat) },
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section Title & Clear Completed Action
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${selectedFilter.label} Tasks (${filteredTodos.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                if (completedCount > 0 && selectedFilter != TodoFilter.PENDING) {
+                    TextButton(
+                        onClick = { todoVm.clearCompleted() },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear Completed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        // Task Items or Empty State
+        if (filteredTodos.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = PurpleContainer,
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (selectedFilter == TodoFilter.COMPLETED) Icons.Default.CheckCircle else Icons.Default.PlaylistAddCheck,
+                                    contentDescription = null,
+                                    tint = PurpleSecondary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (selectedFilter == TodoFilter.COMPLETED) {
+                                "No completed tasks yet"
+                            } else if (totalCount > 0 && pendingCount == 0) {
+                                "All tasks completed! 🎉"
+                            } else {
+                                "No tasks found"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (totalCount == 0) {
+                                "Add your first task above or tap 'New task'."
+                            } else {
+                                "Check off items as you finish them or switch filters."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            items(filteredTodos, key = { it.id }) { todo ->
+                TodoItemCard(
+                    todo = todo,
+                    onToggleCompleted = { todoVm.toggleCompleted(todo) },
+                    onEdit = { onEditClick(todo) },
+                    onDelete = { onDeleteClick(todo) },
+                    onScheduleReminder = { onScheduleReminderForTodo(todo) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun TimetableTabContent(
     reminders: List<Reminder>,
     vm: ReminderViewModel,
@@ -899,6 +1348,8 @@ private fun TimetableTabContent(
 private fun SettingsTabContent(
     totalReminders: Int,
     activeReminders: Int,
+    totalTodos: Int,
+    pendingTodos: Int,
     onTriggerTest: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1122,7 +1573,7 @@ private fun SettingsTabContent(
                         Text("100% Offline & Private", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                     Text(
-                        text = "• No accounts or sign-in required\n• Zero analytics, advertising, or tracking SDKs\n• On-device Google ML Kit OCR text processing\n• Stored securely in local SQLite Room database\n• Automatic reboot recovery via AlarmManager\n• Currently tracking $totalReminders total reminders ($activeReminders active)",
+                        text = "• No accounts or cloud sync required\n• Zero analytics, advertising, or telemetry SDKs\n• On-device Google ML Kit OCR text processing\n• Local SQLite Room database with reactive StateFlow\n• Automatic reboot recovery via AlarmManager\n• Currently tracking $totalReminders reminders ($activeReminders active) & $totalTodos tasks ($pendingTodos pending)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 20.sp
