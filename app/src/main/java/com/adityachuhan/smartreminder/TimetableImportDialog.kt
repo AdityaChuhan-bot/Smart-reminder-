@@ -21,7 +21,7 @@ fun TimetableImportDialog(entries: List<TimetableEntry>, onDismiss: () -> Unit, 
         title = {
             Column {
                 Text("Timetable found", fontWeight = FontWeight.Black)
-                Text("\${entries.size} classes detected", style = MaterialTheme.typography.bodyMedium)
+                Text("${entries.size} classes detected", style = MaterialTheme.typography.bodyMedium)
             }
         },
         text = {
@@ -38,7 +38,7 @@ fun TimetableImportDialog(entries: List<TimetableEntry>, onDismiss: () -> Unit, 
                 LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     items(entries) { e ->
                         Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFFF7F7FF)) {
-                            Text("\${days.getOrElse(e.dayOfWeek) { "" }}  %02d:%02d  •  \${e.title}".format(e.hour, e.minute), Modifier.padding(11.dp))
+                            Text("${days.getOrElse(e.dayOfWeek) { "" }}  %02d:%02d  •  ${e.title}".format(e.hour, e.minute), Modifier.padding(11.dp))
                         }
                     }
                 }
