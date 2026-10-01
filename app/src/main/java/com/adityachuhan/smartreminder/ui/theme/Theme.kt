@@ -48,12 +48,41 @@ private val DarkColorScheme = darkColorScheme(
     onSurfaceVariant = OnSurfaceVariantDark
 )
 
+// Pure #000000 Pitch Black AMOLED Color Scheme
+private val AmoledColorScheme = darkColorScheme(
+    primary = AmoledPrimary,
+    onPrimary = AmoledOnPrimary,
+    primaryContainer = AmoledPrimaryContainer,
+    onPrimaryContainer = AmoledOnPrimaryContainer,
+    secondary = AmoledSecondary,
+    onSecondary = AmoledOnSecondary,
+    secondaryContainer = AmoledSecondaryContainer,
+    onSecondaryContainer = AmoledOnSecondaryContainer,
+    tertiary = AmoledTertiary,
+    onTertiary = AmoledOnTertiary,
+    tertiaryContainer = AmoledTertiaryContainer,
+    onTertiaryContainer = AmoledOnTertiaryContainer,
+    background = AmoledBackground,
+    onBackground = AmoledOnSurface,
+    surface = AmoledSurface,
+    onSurface = AmoledOnSurface,
+    surfaceVariant = AmoledSurfaceVariant,
+    onSurfaceVariant = AmoledOnSurfaceVariant
+)
+
 @Composable
 fun SmartReminderTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: AppThemeMode = AppThemeMode.SYSTEM,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val isSystemDark = isSystemInDarkTheme()
+    val colorScheme = when (themeMode) {
+        AppThemeMode.LIGHT -> LightColorScheme
+        AppThemeMode.DARK -> DarkColorScheme
+        AppThemeMode.AMOLED -> AmoledColorScheme
+        AppThemeMode.SYSTEM -> if (isSystemDark) DarkColorScheme else LightColorScheme
+    }
+
     MaterialTheme(
         colorScheme = colorScheme,
         content = content

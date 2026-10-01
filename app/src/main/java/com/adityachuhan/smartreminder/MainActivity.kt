@@ -19,7 +19,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -32,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -69,8 +72,16 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            SmartReminderTheme {
-                MainAppScaffold()
+            var themeMode by remember { mutableStateOf(ThemePreferences.getThemeMode(this)) }
+
+            SmartReminderTheme(themeMode = themeMode) {
+                MainAppScaffold(
+                    currentThemeMode = themeMode,
+                    onThemeChanged = { newMode ->
+                        themeMode = newMode
+                        ThemePreferences.setThemeMode(this, newMode)
+                    }
+                )
             }
         }
     }
@@ -101,6 +112,8 @@ enum class TodoFilter(val label: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainAppScaffold(
+    currentThemeMode: AppThemeMode,
+    onThemeChanged: (AppThemeMode) -> Unit,
     vm: ReminderViewModel = viewModel(),
     timetableVm: TimetableViewModel = viewModel(),
     todoVm: TodoViewModel = viewModel()
@@ -201,7 +214,7 @@ private fun MainAppScaffold(
                                 fontWeight = FontWeight.Black
                             )
                             Text(
-                                text = "Offline • Alarm-grade",
+                                text = if (currentThemeMode == AppThemeMode.AMOLED) "AMOLED • 100% Offline" else "Offline • Alarm-grade",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -391,6 +404,8 @@ private fun MainAppScaffold(
                         activeReminders = activeCount,
                         totalTodos = todos.size,
                         pendingTodos = pendingTodoCount,
+                        currentThemeMode = currentThemeMode,
+                        onThemeChanged = onThemeChanged,
                         onTriggerTest = {
                             val alarm = context.getSystemService(AlarmManager::class.java)
                             val intent = Intent(context, ReminderReceiver::class.java).apply {
@@ -1350,6 +1365,8 @@ private fun SettingsTabContent(
     activeReminders: Int,
     totalTodos: Int,
     pendingTodos: Int,
+    currentThemeMode: AppThemeMode,
+    onThemeChanged: (AppThemeMode) -> Unit,
     onTriggerTest: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1383,10 +1400,141 @@ private fun SettingsTabContent(
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "System reliability and diagnostics",
+                    text = "Appearance, system reliability and diagnostics",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+
+        // Display & AMOLED Theme Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Palette, null, tint = IndigoPrimary)
+                            Text("Display & Theme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        if (currentThemeMode == AppThemeMode.AMOLED) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AmoledPrimaryContainer
+                            ) {
+                                Text(
+                                    text = "⚡ OLED Battery Saver",
+                                    color = AmoledPrimary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Choose your preferred appearance. AMOLED Black uses pure #000000 black to shut off OLED pixels and maximize battery life.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Theme Options List
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AppThemeMode.entries.forEach { mode ->
+                            val isSelected = currentThemeMode == mode
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isSelected) {
+                                    if (mode == AppThemeMode.AMOLED) Color(0xFF18181B) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                },
+                                border = if (isSelected) BorderStroke(1.5.dp, if (mode == AppThemeMode.AMOLED) AmoledPrimary else IndigoPrimary) else null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { onThemeChanged(mode) }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        // Swatch indicator circle
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = when (mode) {
+                                                AppThemeMode.SYSTEM -> Color(0xFF64748B)
+                                                AppThemeMode.LIGHT -> Color(0xFFF1F5F9)
+                                                AppThemeMode.DARK -> Color(0xFF0F172A)
+                                                AppThemeMode.AMOLED -> Color(0xFF000000)
+                                            },
+                                            border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f)),
+                                            modifier = Modifier.size(24.dp)
+                                        ) {}
+
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = mode.title,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                                )
+                                                if (mode == AppThemeMode.AMOLED) {
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = Color(0xFF0F172A)
+                                                    ) {
+                                                        Text(
+                                                            text = "#000000",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = AmoledPrimary,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Text(
+                                                text = mode.subtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { onThemeChanged(mode) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
