@@ -1,298 +1,1134 @@
 package com.adityachuhan.smartreminder
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adityachuhan.smartreminder.data.Reminder
+import com.adityachuhan.smartreminder.ui.components.*
+import com.adityachuhan.smartreminder.ui.theme.*
 import kotlinx.coroutines.launch
-import java.text.DateFormat
 import java.util.Calendar
-import java.util.Date
-
-private val BrightBlue = Color(0xFF2563EB)
-private val BrightCyan = Color(0xFF06B6D4)
-private val BrightPurple = Color(0xFF7C3AED)
-private val SoftBackground = Color(0xFFF5F7FF)
 
 class MainActivity : ComponentActivity() {
+
     private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel("reminders", "Reminders", NotificationManager.IMPORTANCE_HIGH)
-        )
+        enableEdgeToEdge()
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("reminders", "Reminders & Classes", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "High-priority Smart Reminder and Timetable alerts"
+                enableLights(true)
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            notificationManager?.createNotificationChannel(channel)
+        }
+
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+
         setContent {
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = BrightBlue,
-                    secondary = BrightPurple,
-                    tertiary = BrightCyan,
-                    background = SoftBackground,
-                    surface = Color.White
-                )
-            ) { ReminderHome() }
+            SmartReminderTheme {
+                MainAppScaffold()
+            }
         }
     }
 }
 
+enum class MainTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    REMINDERS("Reminders", Icons.Default.NotificationsActive),
+    TIMETABLE("Timetable", Icons.Default.School),
+    SETTINGS("Settings", Icons.Default.Settings)
+}
+
+enum class FilterOption(val label: String) {
+    ALL("All"),
+    TODAY("Today"),
+    ACTIVE("Active"),
+    REPEATING("Repeating"),
+    ONE_TIME("One-time")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReminderHome(vm: ReminderViewModel = viewModel(), timetableVm: TimetableViewModel = viewModel()) {
+private fun MainAppScaffold(
+    vm: ReminderViewModel = viewModel(),
+    timetableVm: TimetableViewModel = viewModel()
+) {
     val context = LocalContext.current
     val reminders by vm.reminders.collectAsState()
     val scope = rememberCoroutineScope()
-    var showAdd by remember { mutableStateOf(false) }
+
+    var currentTab by remember { mutableStateOf(MainTab.REMINDERS) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var reminderToEdit by remember { mutableStateOf<Reminder?>(null) }
+    var reminderToDelete by remember { mutableStateOf<Reminder?>(null) }
+
     var entries by remember { mutableStateOf<List<TimetableEntry>>(emptyList()) }
     var reading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    fun process(uri: Uri) {
+    val activeCount = remember(reminders) { reminders.count { it.enabled } }
+
+    fun processScreenshot(uri: Uri) {
         reading = true
         scope.launch {
             try {
                 val found = TimetableOcr.extract(context, uri)
                 entries = found
-                if (found.isEmpty()) error = "No classes detected. Use a clear timetable screenshot with weekday and time labels."
-            } catch (_: Exception) {
-                error = "Could not read this image. Please choose a JPG or PNG timetable screenshot."
-            } finally { reading = false }
+                if (found.isEmpty()) {
+                    error = "No classes detected. Please use a clear timetable screenshot with weekday names and time columns."
+                }
+            } catch (e: Exception) {
+                error = "Could not read this image: ${e.localizedMessage ?: "Unknown error"}. Please choose a standard JPG or PNG timetable image."
+            } finally {
+                reading = false
+            }
         }
     }
 
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(::process) }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(::process) }
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let(::processScreenshot)
+    }
+    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let(::processScreenshot)
+    }
 
     fun chooseScreenshot() {
         if (Build.VERSION.SDK_INT >= 33) {
-            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         } else {
-            gallery.launch("image/*")
+            galleryLauncher.launch("image/*")
         }
     }
 
     Scaffold(
-        containerColor = SoftBackground,
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Smart Reminder", fontWeight = FontWeight.Black)
-                        Text("Plan it. Forget it. Get reminded.", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = IndigoPrimary.copy(alpha = 0.12f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Alarm,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .size(20.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Smart Reminder",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black
+                            )
+                            Text(
+                                text = "Offline • Alarm-grade",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
-                actions = { IconButton(onClick = {}) { Icon(Icons.Default.Settings, "Settings") } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                actions = {
+                    IconButton(onClick = ::chooseScreenshot) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = "Scan Timetable Screenshot",
+                            tint = PurpleSecondary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("New reminder", fontWeight = FontWeight.Bold) },
-                containerColor = BrightBlue,
-                contentColor = Color.White
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 110.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item { HeroCard(reminders.count { it.enabled }, ::chooseScreenshot) }
-            item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCard(Modifier.weight(1f), Icons.Default.NotificationsActive, "\${reminders.count { it.enabled }}", "Active")
-                    StatCard(Modifier.weight(1f), Icons.Default.CalendarMonth, "\${reminders.count { it.repeat != "NONE" }}", "Repeating")
-                    StatCard(Modifier.weight(1f), Icons.Default.Schedule, "\${reminders.count { it.repeat == "NONE" }}", "One-time")
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp
+            ) {
+                MainTab.entries.forEach { tab ->
+                    val isSelected = currentTab == tab
+                    NavigationBarItem(
+                        selected = isSelected,
+                        onClick = { currentTab = tab },
+                        icon = {
+                            if (tab == MainTab.REMINDERS && activeCount > 0) {
+                                BadgedBox(
+                                    badge = {
+                                        Badge(
+                                            containerColor = IndigoPrimary,
+                                            contentColor = Color.White
+                                        ) {
+                                            Text(activeCount.toString())
+                                        }
+                                    }
+                                ) {
+                                    Icon(tab.icon, contentDescription = tab.label)
+                                }
+                            } else {
+                                Icon(tab.icon, contentDescription = tab.label)
+                            }
+                        },
+                        label = {
+                            Text(
+                                text = tab.label,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = IndigoPrimary,
+                            indicatorColor = IndigoContainer
+                        )
+                    )
                 }
             }
-            item { Text("Upcoming reminders", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
-            if (reminders.isEmpty()) {
-                item { EmptyState(::chooseScreenshot) { showAdd = true } }
-            } else {
-                items(reminders, key = { it.id }) { ReminderCard(it, vm) }
+        },
+        floatingActionButton = {
+            if (currentTab != MainTab.SETTINGS) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        reminderToEdit = null
+                        showAddDialog = true
+                    },
+                    icon = { Icon(Icons.Default.Add, null) },
+                    text = { Text("New reminder", fontWeight = FontWeight.Bold) },
+                    containerColor = IndigoPrimary,
+                    contentColor = Color.White,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
+                )
+            }
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            when (currentTab) {
+                MainTab.REMINDERS -> {
+                    RemindersTabContent(
+                        reminders = reminders,
+                        vm = vm,
+                        onScanClick = ::chooseScreenshot,
+                        onAddClick = {
+                            reminderToEdit = null
+                            showAddDialog = true
+                        },
+                        onEditClick = { reminder ->
+                            reminderToEdit = reminder
+                            showAddDialog = true
+                        },
+                        onDeleteClick = { reminder ->
+                            reminderToDelete = reminder
+                        },
+                        onSnooze = { reminder, mins ->
+                            vm.snooze(reminder, mins)
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Snoozed for ${if (mins < 60) "${mins}m" else "1 hour"}")
+                            }
+                        }
+                    )
+                }
+                MainTab.TIMETABLE -> {
+                    TimetableTabContent(
+                        reminders = reminders,
+                        vm = vm,
+                        onScanClick = ::chooseScreenshot,
+                        onEditClick = { reminder ->
+                            reminderToEdit = reminder
+                            showAddDialog = true
+                        },
+                        onDeleteClick = { reminder ->
+                            reminderToDelete = reminder
+                        }
+                    )
+                }
+                MainTab.SETTINGS -> {
+                    SettingsTabContent(
+                        totalReminders = reminders.size,
+                        activeReminders = activeCount,
+                        onTriggerTest = {
+                            val alarm = context.getSystemService(AlarmManager::class.java)
+                            val intent = Intent(context, ReminderReceiver::class.java).apply {
+                                putExtra("id", 88888L)
+                                putExtra("title", "Smart Reminder: Alert Test Successful!")
+                                putExtra("note", "Your sound, vibration, and exact alarm delivery are functioning properly.")
+                                putExtra("repeat", "NONE")
+                            }
+                            val pending = PendingIntent.getBroadcast(
+                                context,
+                                88888,
+                                intent,
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                            )
+                            val triggerTime = System.currentTimeMillis() + 4000L
+                            if (Build.VERSION.SDK_INT >= 31 && alarm != null && alarm.canScheduleExactAlarms()) {
+                                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pending)
+                            } else {
+                                alarm?.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pending)
+                            }
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Test alarm scheduled! It will fire in 4 seconds.")
+                            }
+                        }
+                    )
+                }
             }
         }
     }
 
-    if (showAdd) AddReminderDialog(
-        onDismiss = { showAdd = false },
-        onSave = { title, note, time, repeat -> vm.add(title, note, time, repeat); showAdd = false }
-    )
-    if (entries.isNotEmpty()) TimetableImportDialog(entries, { entries = emptyList() }) { lead ->
-        timetableVm.importEntries(entries, lead) { entries = emptyList() }
+    // Add / Edit Reminder Dialog
+    if (showAddDialog) {
+        AddReminderDialog(
+            initialReminder = reminderToEdit,
+            onDismiss = {
+                showAddDialog = false
+                reminderToEdit = null
+            },
+            onSave = { title, note, time, repeat, repeatDayOfWeek ->
+                if (reminderToEdit != null) {
+                    val updated = reminderToEdit!!.copy(
+                        title = title,
+                        note = note,
+                        triggerAt = time,
+                        repeat = repeat,
+                        repeatDayOfWeek = repeatDayOfWeek,
+                        enabled = true
+                    )
+                    vm.update(updated)
+                    scope.launch { snackbarHostState.showSnackbar("Reminder updated") }
+                } else {
+                    vm.add(title, note, time, repeat, repeatDayOfWeek)
+                    scope.launch { snackbarHostState.showSnackbar("Reminder scheduled") }
+                }
+                showAddDialog = false
+                reminderToEdit = null
+            }
+        )
     }
-    if (reading) AlertDialog(
-        onDismissRequest = {},
-        title = { Text("Reading your timetable", fontWeight = FontWeight.Black) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("Finding days, times and class names on your device.")
-        } },
-        confirmButton = {}
-    )
+
+    // Delete Confirmation Dialog
+    reminderToDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { reminderToDelete = null },
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("Delete Reminder?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Are you sure you want to delete \"${target.title}\"? Scheduled alarms will be cancelled immediately.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.delete(target)
+                        reminderToDelete = null
+                        scope.launch { snackbarHostState.showSnackbar("Reminder deleted") }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { reminderToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Timetable Detected Dialog
+    if (entries.isNotEmpty()) {
+        TimetableImportDialog(
+            entries = entries,
+            onDismiss = { entries = emptyList() },
+            onImport = { leadMinutes, selectedEntries ->
+                timetableVm.importEntries(selectedEntries, leadMinutes) {
+                    val count = selectedEntries.size
+                    entries = emptyList()
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Scheduled $count weekly class reminders!")
+                    }
+                }
+            }
+        )
+    }
+
+    // Scanning OCR Indicator Dialog
+    if (reading) {
+        AlertDialog(
+            onDismissRequest = {},
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Reading Timetable", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = IndigoPrimary
+                    )
+                    Text(
+                        text = "Analyzing days, time slots, and subject names with on-device ML Kit OCR...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // Error Dialog
     error?.let { message ->
         AlertDialog(
             onDismissRequest = { error = null },
-            title = { Text("Import failed", fontWeight = FontWeight.Black) },
+            shape = RoundedCornerShape(22.dp),
+            title = { Text("Timetable Scan", fontWeight = FontWeight.Black) },
             text = { Text(message) },
-            confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } }
+            confirmButton = {
+                TextButton(onClick = { error = null }) {
+                    Text("OK", fontWeight = FontWeight.Bold)
+                }
+            }
         )
     }
 }
 
 @Composable
-private fun HeroCard(count: Int, onUpload: () -> Unit) {
-    Card(shape = RoundedCornerShape(30.dp), colors = CardDefaults.cardColors(Color.Transparent)) {
-        Box(
-            Modifier.fillMaxWidth().background(
-                Brush.linearGradient(listOf(BrightBlue, BrightPurple, BrightCyan))
-            ).padding(22.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = RoundedCornerShape(14.dp), color = Color.White.copy(.18f)) {
-                        Icon(Icons.Default.AutoAwesome, null, tint = Color.White, modifier = Modifier.padding(10.dp))
+private fun RemindersTabContent(
+    reminders: List<Reminder>,
+    vm: ReminderViewModel,
+    onScanClick: () -> Unit,
+    onAddClick: () -> Unit,
+    onEditClick: (Reminder) -> Unit,
+    onDeleteClick: (Reminder) -> Unit,
+    onSnooze: (Reminder, Int) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf(FilterOption.ALL) }
+
+    val calNow = Calendar.getInstance()
+    val todayRemindersCount = remember(reminders) {
+        reminders.count { r ->
+            val c = Calendar.getInstance().apply { timeInMillis = r.triggerAt }
+            c.get(Calendar.YEAR) == calNow.get(Calendar.YEAR) &&
+                    c.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR) &&
+                    r.enabled
+        }
+    }
+
+    val activeCount = remember(reminders) { reminders.count { it.enabled } }
+    val repeatingCount = remember(reminders) { reminders.count { it.repeat != "NONE" && it.enabled } }
+
+    val filteredList = remember(reminders, searchQuery, selectedFilter) {
+        reminders.filter { r ->
+            val matchesQuery = searchQuery.isBlank() ||
+                    r.title.contains(searchQuery, ignoreCase = true) ||
+                    r.note.contains(searchQuery, ignoreCase = true)
+
+            if (!matchesQuery) return@filter false
+
+            when (selectedFilter) {
+                FilterOption.ALL -> true
+                FilterOption.TODAY -> {
+                    val c = Calendar.getInstance().apply { timeInMillis = r.triggerAt }
+                    c.get(Calendar.YEAR) == calNow.get(Calendar.YEAR) &&
+                            c.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR)
+                }
+                FilterOption.ACTIVE -> r.enabled
+                FilterOption.REPEATING -> r.repeat != "NONE"
+                FilterOption.ONE_TIME -> r.repeat == "NONE"
+            }
+        }.sortedWith(
+            compareBy<Reminder> { !it.enabled }
+                .thenBy { it.triggerAt }
+        )
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 100.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Hero Card
+        item {
+            HeroCard(
+                activeCount = activeCount,
+                todayCount = todayRemindersCount,
+                onUploadClick = onScanClick,
+                onAddClick = onAddClick
+            )
+        }
+
+        // Quick Stat Cards Row
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                StatCard(
+                    count = activeCount.toString(),
+                    label = "Active",
+                    icon = Icons.Default.NotificationsActive,
+                    iconTint = IndigoPrimary,
+                    isSelected = selectedFilter == FilterOption.ACTIVE,
+                    onClick = {
+                        selectedFilter = if (selectedFilter == FilterOption.ACTIVE) FilterOption.ALL else FilterOption.ACTIVE
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    count = todayRemindersCount.toString(),
+                    label = "Today",
+                    icon = Icons.Default.CalendarToday,
+                    iconTint = CyanTertiary,
+                    isSelected = selectedFilter == FilterOption.TODAY,
+                    onClick = {
+                        selectedFilter = if (selectedFilter == FilterOption.TODAY) FilterOption.ALL else FilterOption.TODAY
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    count = repeatingCount.toString(),
+                    label = "Repeating",
+                    icon = Icons.Default.Repeat,
+                    iconTint = PurpleSecondary,
+                    isSelected = selectedFilter == FilterOption.REPEATING,
+                    onClick = {
+                        selectedFilter = if (selectedFilter == FilterOption.REPEATING) FilterOption.ALL else FilterOption.REPEATING
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // Search Bar
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search reminders, notes, classes...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                        }
                     }
-                    Spacer(Modifier.width(10.dp))
-                    Text("SMART DAY PLANNER", color = Color.White, fontWeight = FontWeight.Black)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Filter Chips Row
+        item {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(FilterOption.entries) { option ->
+                    val isSelected = selectedFilter == option
+                    val count = when (option) {
+                        FilterOption.ALL -> reminders.size
+                        FilterOption.TODAY -> todayRemindersCount
+                        FilterOption.ACTIVE -> activeCount
+                        FilterOption.REPEATING -> repeatingCount
+                        FilterOption.ONE_TIME -> reminders.count { it.repeat == "NONE" }
+                    }
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { selectedFilter = option },
+                        label = {
+                            Text(
+                                text = "${option.label} ($count)",
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
-                Text("Turn your timetable\\ninto reminders.", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-                Text("\${count} active reminders • on-device timetable processing", color = Color.White.copy(.88f))
-                Button(
-                    onClick = onUpload,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = BrightBlue)
+            }
+        }
+
+        // Section Title
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${selectedFilter.label} Reminders (${filteredList.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+
+        // Reminder List or Empty State
+        if (filteredList.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
-                    Icon(Icons.Default.CloudUpload, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Upload timetable screenshot", fontWeight = FontWeight.Black)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = IndigoContainer,
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (searchQuery.isNotBlank()) Icons.Default.SearchOff else Icons.Default.NotificationsNone,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (searchQuery.isNotBlank()) "No matching reminders" else "No reminders scheduled",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (searchQuery.isNotBlank()) {
+                                "Try a different search keyword."
+                            } else {
+                                "Tap 'New reminder' or scan your timetable screenshot to get started."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onAddClick,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                            ) {
+                                Text("New reminder")
+                            }
+                            OutlinedButton(
+                                onClick = onScanClick,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Scan timetable")
+                            }
+                        }
+                    }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun StatCard(modifier: Modifier, icon: ImageVector, value: String, label: String) {
-    Card(modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(Color.White)) {
-        Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(icon, null, tint = BrightBlue)
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            Text(label, style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-@Composable
-private fun EmptyState(onUpload: () -> Unit, onAdd: () -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(Color.White)) {
-        Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Default.CalendarMonth, null, tint = BrightPurple, modifier = Modifier.size(52.dp))
-            Text("Nothing scheduled yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-            Text("Upload your college timetable and turn it into a weekly reminder schedule.")
-            Button(onClick = onUpload, shape = RoundedCornerShape(14.dp)) {
-                Icon(Icons.Default.Image, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Choose screenshot")
-            }
-            OutlinedButton(onClick = onAdd, shape = RoundedCornerShape(14.dp)) { Text("Create manually") }
-        }
-    }
-}
-
-@Composable
-private fun ReminderCard(r: Reminder, vm: ReminderViewModel) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(Color.White)) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp, 58.dp).clip(RoundedCornerShape(8.dp)).background(if (r.enabled) BrightBlue else Color.LightGray))
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(r.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(r.triggerAt)))
-                if (r.note.isNotBlank()) Text(r.note, style = MaterialTheme.typography.bodySmall)
-                Text(if (r.repeat == "NONE") "One time" else r.repeat.lowercase().replaceFirstChar { it.uppercase() }, color = BrightPurple, fontWeight = FontWeight.Bold)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                TextButton(onClick = { vm.update(r.copy(enabled = !r.enabled)) }) { Text(if (r.enabled) "On" else "Off") }
-                TextButton(onClick = { vm.delete(r) }) { Text("Delete") }
+        } else {
+            items(filteredList, key = { it.id }) { reminder ->
+                ReminderCard(
+                    reminder = reminder,
+                    onToggleEnable = { enabled -> vm.update(reminder.copy(enabled = enabled)) },
+                    onEdit = { onEditClick(reminder) },
+                    onDelete = { onDeleteClick(reminder) },
+                    onSnooze = { mins -> onSnooze(reminder, mins) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun AddReminderDialog(onDismiss: () -> Unit, onSave: (String, String, Long, String) -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var repeat by remember { mutableStateOf("NONE") }
-    val initial = remember { Calendar.getInstance().apply { add(Calendar.MINUTE, 5); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) } }
-    var selected by remember { mutableStateOf(initial.timeInMillis) }
-    val context = LocalContext.current
-    fun pick() {
-        val base = Calendar.getInstance().apply { timeInMillis = selected }
-        android.app.DatePickerDialog(context, { _, y, m, d ->
-            android.app.TimePickerDialog(context, { _, h, min ->
-                base.set(y, m, d, h, min, 0); base.set(Calendar.MILLISECOND, 0); selected = base.timeInMillis
-            }, base.get(Calendar.HOUR_OF_DAY), base.get(Calendar.MINUTE), false).show()
-        }, base.get(Calendar.YEAR), base.get(Calendar.MONTH), base.get(Calendar.DAY_OF_MONTH)).show()
+private fun TimetableTabContent(
+    reminders: List<Reminder>,
+    vm: ReminderViewModel,
+    onScanClick: () -> Unit,
+    onEditClick: (Reminder) -> Unit,
+    onDeleteClick: (Reminder) -> Unit
+) {
+    var selectedDayNumber by remember {
+        val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        mutableIntStateOf(today) // 1=Sun, 2=Mon... 7=Sat
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create reminder", fontWeight = FontWeight.Black) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(title, { title = it }, label = { Text("What should I remind you about?") }, singleLine = true)
-            OutlinedTextField(note, { note = it }, label = { Text("Note (optional)") })
-            OutlinedButton(onClick = ::pick, modifier = Modifier.fillMaxWidth()) {
-                Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(selected)))
-            }
-            Text("Repeat", fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("NONE", "DAILY", "WEEKLY").forEach { option ->
-                    FilterChip(selected = repeat == option, onClick = { repeat = option }, label = { Text(option) })
-                }
-            }
-        } },
-        confirmButton = { TextButton(enabled = title.isNotBlank(), onClick = { onSave(title.trim(), note.trim(), selected, repeat) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+
+    val days = listOf(
+        2 to "Mon",
+        3 to "Tue",
+        4 to "Wed",
+        5 to "Thu",
+        6 to "Fri",
+        7 to "Sat",
+        1 to "Sun"
     )
+
+    // Precalculate counts for each day
+    val dayCounts = remember(reminders) {
+        days.associate { (dayNum, _) ->
+            dayNum to reminders.count { r ->
+                if (!r.enabled) return@count false
+                if (r.repeat == "DAILY") return@count true
+                if (r.repeat == "WEEKDAYS" && dayNum in 2..6) return@count true
+                if (r.repeat == "WEEKLY") {
+                    val dayOfWeek = r.repeatDayOfWeek ?: Calendar.getInstance().apply { timeInMillis = r.triggerAt }.get(Calendar.DAY_OF_WEEK)
+                    return@count dayOfWeek == dayNum
+                }
+                false
+            }
+        }
+    }
+
+    // Filter reminders that repeat on this day
+    val classesForDay = remember(reminders, selectedDayNumber) {
+        reminders.filter { r ->
+            if (r.repeat == "DAILY") return@filter true
+            if (r.repeat == "WEEKDAYS" && selectedDayNumber in 2..6) return@filter true
+            if (r.repeat == "WEEKLY") {
+                val dayOfWeek = r.repeatDayOfWeek ?: Calendar.getInstance().apply { timeInMillis = r.triggerAt }.get(Calendar.DAY_OF_WEEK)
+                return@filter dayOfWeek == selectedDayNumber
+            }
+            false
+        }.sortedBy { r ->
+            val c = Calendar.getInstance().apply { timeInMillis = r.triggerAt }
+            c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 100.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Weekly Schedule",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = "Recurring classes, lectures, and timetable routine",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Quick Scan CTA Banner
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Import Timetable Photo",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "OCR detects days, times, and subject names",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(
+                        onClick = onScanClick,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PurpleSecondary)
+                    ) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Upload", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Day of Week Tabs with Counts
+        item {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(days) { (dayNum, name) ->
+                    val isSelected = selectedDayNumber == dayNum
+                    val count = dayCounts[dayNum] ?: 0
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { selectedDayNumber = dayNum },
+                        label = {
+                            Text(
+                                text = "$name • $count",
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "Classes on this day (${classesForDay.size})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (classesForDay.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.School,
+                            contentDescription = null,
+                            tint = PurpleSecondary,
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Text(
+                            text = "No classes on this day",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Upload a timetable image to automatically populate your week or create custom reminders.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            items(classesForDay, key = { it.id }) { cls ->
+                ReminderCard(
+                    reminder = cls,
+                    onToggleEnable = { enabled -> vm.update(cls.copy(enabled = enabled)) },
+                    onEdit = { onEditClick(cls) },
+                    onDelete = { onDeleteClick(cls) },
+                    onSnooze = { mins -> vm.snooze(cls, mins) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTabContent(
+    totalReminders: Int,
+    activeReminders: Int,
+    onTriggerTest: () -> Unit
+) {
+    val context = LocalContext.current
+    val notificationsAllowed = remember {
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    val exactAlarmsAllowed = remember {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java)
+            alarmManager?.canScheduleExactAlarms() ?: true
+        } else {
+            true
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "App Settings",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = "System reliability and diagnostics",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Notification Permissions Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Notifications, null, tint = IndigoPrimary)
+                            Text("Notifications", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (notificationsAllowed) SuccessGreenContainer else DangerRedContainer
+                        ) {
+                            Text(
+                                text = if (notificationsAllowed) "Granted" else "Disabled",
+                                color = if (notificationsAllowed) SuccessGreen else DangerRed,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Allows Smart Reminder to alert you with high-priority heads-up banners when reminders and classes arrive.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (!notificationsAllowed) {
+                        Button(
+                            onClick = {
+                                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                                context.startActivity(intent)
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Enable in System Settings")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Exact Alarm Permission Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Alarm, null, tint = PurpleSecondary)
+                            Text("Exact Alarms", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (exactAlarmsAllowed) SuccessGreenContainer else WarningAmberContainer
+                        ) {
+                            Text(
+                                text = if (exactAlarmsAllowed) "Exact (Doze-safe)" else "Inexact",
+                                color = if (exactAlarmsAllowed) SuccessGreen else WarningAmber,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Enables precise alarm delivery even while your phone is asleep in deep Doze mode.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (Build.VERSION.SDK_INT >= 31 && !exactAlarmsAllowed) {
+                        OutlinedButton(
+                            onClick = {
+                                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Grant Exact Alarm Permission")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Test Notification Diagnostics
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, null, tint = CyanTertiary)
+                        Text("Alarm Diagnostics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                        text = "Trigger a 4-second test alarm to verify your phone's notification channel, volume, and vibration work properly.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = onTriggerTest,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanTertiary)
+                    ) {
+                        Icon(Icons.Default.Alarm, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Test Alarm (Fires in 4s)")
+                    }
+                }
+            }
+        }
+
+        // Privacy & Architecture Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Security, null, tint = SuccessGreen)
+                        Text("100% Offline & Private", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                        text = "• No accounts or sign-in required\n• Zero analytics, advertising, or tracking SDKs\n• On-device Google ML Kit OCR text processing\n• Stored securely in local SQLite Room database\n• Automatic reboot recovery via AlarmManager\n• Currently tracking $totalReminders total reminders ($activeReminders active)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 20.sp
+                    )
+                }
+            }
+        }
+    }
 }

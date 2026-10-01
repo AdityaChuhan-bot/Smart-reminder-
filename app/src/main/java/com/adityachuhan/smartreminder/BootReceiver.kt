@@ -10,12 +10,19 @@ import kotlinx.coroutines.launch
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val action = intent.action
+        if (action != Intent.ACTION_BOOT_COMPLETED &&
+            action != Intent.ACTION_MY_PACKAGE_REPLACED &&
+            action != Intent.ACTION_TIME_CHANGED &&
+            action != Intent.ACTION_TIMEZONE_CHANGED) {
+            return
+        }
+
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                AppDatabase.get(context).reminderDao().getEnabled().forEach {
-                    ReminderScheduler.schedule(context, it)
+                AppDatabase.get(context).reminderDao().getEnabled().forEach { reminder ->
+                    ReminderScheduler.schedule(context, reminder)
                 }
             } finally {
                 pending.finish()

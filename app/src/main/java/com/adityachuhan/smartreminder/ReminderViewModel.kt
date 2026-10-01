@@ -15,10 +15,19 @@ class ReminderViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
-    fun add(title: String, note: String, triggerAt: Long, repeat: String) {
+    fun add(title: String, note: String, triggerAt: Long, repeat: String, repeatDayOfWeek: Int? = null) {
         viewModelScope.launch {
-            val id = dao.insert(Reminder(title = title, note = note, triggerAt = triggerAt, repeat = repeat))
-            dao.getEnabled().firstOrNull { it.id == id }?.let {
+            val id = dao.insert(
+                Reminder(
+                    title = title,
+                    note = note,
+                    triggerAt = triggerAt,
+                    repeat = repeat,
+                    repeatDayOfWeek = repeatDayOfWeek,
+                    enabled = true
+                )
+            )
+            dao.getById(id)?.let {
                 ReminderScheduler.schedule(getApplication(), it)
             }
         }
@@ -28,7 +37,17 @@ class ReminderViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             ReminderScheduler.cancel(getApplication(), reminder)
             dao.update(reminder)
-            if (reminder.enabled) ReminderScheduler.schedule(getApplication(), reminder)
+            if (reminder.enabled) {
+                ReminderScheduler.schedule(getApplication(), reminder)
+            }
+        }
+    }
+
+    fun snooze(reminder: Reminder, minutes: Int = 10) {
+        viewModelScope.launch {
+            val newTime = System.currentTimeMillis() + minutes * 60 * 1000L
+            val snoozed = reminder.copy(triggerAt = newTime, enabled = true)
+            update(snoozed)
         }
     }
 

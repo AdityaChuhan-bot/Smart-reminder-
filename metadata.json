@@ -1,0 +1,6 @@
+{
+  "name": "Smart Reminder",
+  "description": "Smart Reminder application with timetable OCR and recurring notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
